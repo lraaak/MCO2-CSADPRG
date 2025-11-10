@@ -9,13 +9,11 @@ import java.time.temporal.ChronoUnit
 
 
 /**
- * CSADPRG MCO2 – DPWH Flood Control Data Processing
- * Author: <Your Name>
- *
- * Fully compliant with REQ-0001 to REQ-0008.
- * - Loads, validates, cleans, filters DPWH dataset.
- * - Computes derived metrics (CostSavings, CompletionDelayDays).
- * - Generates and prints 3 analytical reports with CSV output.
+ ********************
+Last names: (Divinagracia)., Atienza, Lazaro, Paguila
+Language: Kotlin
+Paradigm(s): Procedural
+ ********************
  */
 
 fun main() {
@@ -124,7 +122,7 @@ fun loadDataset(): AnyFrame {
             val start = row["StartDate"] as? LocalDate
             val end = row["ActualCompletionDate"] as? LocalDate
             if (start != null && end != null)
-                java.time.temporal.ChronoUnit.DAYS.between(start, end)
+                ChronoUnit.DAYS.between(start, end)
             else 0L
         }
 
@@ -250,13 +248,11 @@ fun generateContractorPerformance(df: AnyFrame): AnyFrame {
             "%.2f".format(value)
         }
 
-        // Add RiskFlag column (<50 → High Risk)
         .add("RiskFlag") {
             val reliability = (it["ReliabilityIndex"] as? Number)?.toDouble() ?: 0.0
             if (reliability < 50.0) "High Risk" else "Stable"
         }
 
-        // 🔹 Fix: Convert TotalCost to Double before sorting
         .convert("TotalCost").with { (it as? Number)?.toDouble() ?: 0.0 }
 
         // Sort descending by TotalCost (requirement)
@@ -310,7 +306,7 @@ fun generateOverrunTrends(df: AnyFrame): AnyFrame {
         else ((avg - base) / base) * 100.0
     }
 
-    // ✅ Step 3: Proper multi-level sorting
+
     val sorted = withYoY.sortWith { r1, r2 ->
         val year1 = (r1["FundingYear"] as Int)
         val year2 = (r2["FundingYear"] as Int)
@@ -318,8 +314,8 @@ fun generateOverrunTrends(df: AnyFrame): AnyFrame {
         val avg2 = (r2["AvgSavings"] as? Double) ?: 0.0
 
         when {
-            year1 != year2 -> year1.compareTo(year2) // ascending year
-            else -> avg2.compareTo(avg1)             // descending savings within same year
+            year1 != year2 -> year1.compareTo(year2)
+            else -> avg2.compareTo(avg1)
         }
     }
 
