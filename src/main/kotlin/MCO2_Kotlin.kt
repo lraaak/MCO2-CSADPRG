@@ -44,37 +44,24 @@ fun main() {
     }
 }
 
-/* ==============================================================
-   REQ-0001 / 0002 / 0003 – Load, Validate, and Clean Data
-   ============================================================== */
+
 fun loadDataset(): AnyFrame {
     val file = File("dpwh_flood_control_projects.csv")
     if (!file.exists()) {
-        println("❌ File not found: ${file.absolutePath}")
+        println("File not found: ${file.absolutePath}")
         return DataFrame.Empty
     }
 
-    println("📂 Loading dataset...")
+    println("Loading dataset...")
     var df = DataFrame.readCSV(file)
     println("Total rows loaded: ${df.rowsCount()}\n")
 
-    // STEP 1: Convert cost columns safely (handle Clustered, MYCA, etc.)
+
     df = df.convert("ApprovedBudgetForContract", "ContractCost").with { value ->
-        val str = value?.toString()?.trim() ?: ""
-        when {
-            str.startsWith("Clustered", ignoreCase = true) -> null
-            str.startsWith("MYCA", ignoreCase = true) -> null
-            str.equals("N/A", ignoreCase = true) -> null
-            str.equals("Not applicable", ignoreCase = true) -> null
-            str.isBlank() -> null
-            else -> str.replace("₱", "")
-                .replace(",", "")
-                .replace(" ", "")
-                .toDoubleOrNull()
-        }
+        value?.toString()?.trim()?.toDoubleOrNull()
     }
 
-    // STEP 2: Convert date columns safely
+
     df = df.convert("StartDate", "ActualCompletionDate").with { value ->
         val str = value?.toString()?.trim() ?: ""
         try {
@@ -84,20 +71,18 @@ fun loadDataset(): AnyFrame {
         }
     }
 
-    // STEP 3: Filter to keep only valid financial + funding year data
+
     val validRows = df.filter { row ->
-        val budget = row["ApprovedBudgetForContract"] as? Number
-        val cost = row["ContractCost"] as? Number
+        val budget = row["ApprovedBudgetForContract"] as? Double
+        val cost = row["ContractCost"] as? Double
         val year = row["FundingYear"]?.toString()?.toIntOrNull()
 
-        budget != null && !budget.toDouble().isNaN() &&
-                cost != null && !cost.toDouble().isNaN() &&
-                year != null && year in 2021..2023
+        budget != null && cost != null && year != null && year in 2021..2023
     }
 
     val invalidRows = df.filter { it !in validRows.rows() }
 
-    // STEP 4: Output summary
+
     val outputDir = File("output")
     if (!outputDir.exists()) outputDir.mkdirs()
 
@@ -107,11 +92,11 @@ fun loadDataset(): AnyFrame {
     val kept = validRows.rowsCount()
     val removed = invalidRows.rowsCount()
 
-    println("✅ Records kept (valid): $kept")
-    println("⚠️ Records removed (invalid): $removed")
-    println("📊 Total processed: ${kept + removed}\n")
+    println("Records kept (valid): $kept")
+    println("Records removed (invalid): $removed")
+    println("Total processed: ${kept + removed}\n")
 
-    // STEP 5: Derived columns for reports
+
     val cleanDf = validRows
         .add("CostSavings") { row ->
             val budget = (row["ApprovedBudgetForContract"] as? Number)?.toDouble() ?: 0.0
@@ -126,14 +111,12 @@ fun loadDataset(): AnyFrame {
             else 0L
         }
 
-    println("📈 Clean dataset ready for reporting.\n")
+    println("Dataset ready for reporting.\n")
     return cleanDf
 }
 
 
-/* ==============================================================
-   REQ-0006 to REQ-0009 – Generate Analytical Reports + Summary
-   ============================================================== */
+
 fun generateReports(df: AnyFrame) {
     val outputDir = File("output")
     if (!outputDir.exists()) outputDir.mkdirs()
@@ -144,25 +127,29 @@ fun generateReports(df: AnyFrame) {
     val r2 = generateContractorPerformance(df)
     val r3 = generateOverrunTrends(df)
 
-    // =============================================================
-    // REQ-0009: Produce summary.json (aggregate key stats)
-    // =============================================================
 
     val totalProjects = df.rowsCount()
-    val totalContractors = df.distinct("Contractor").rowsCount()
+    val totalContractors = df
+        .filter { row ->
+            val year = (row["FundingYear"] as? Number)?.toInt()
+            year != null && year in 2021..2023
+        }
+        .select("Contractor")
+        .distinct()
+        .rowsCount()
     val totalProvinces = df.distinct("Province").rowsCount()
 
-    // compute average delay safely
+
     val avgDelay = df.rows()
         .mapNotNull { row -> (row["CompletionDelayDays"] as? Number)?.toDouble() }
         .average()
 
-    // compute total savings safely
+
     val totalSavings = df.rows()
         .mapNotNull { row -> (row["CostSavings"] as? Number)?.toDouble() }
         .sum()
 
-    // prepare key-value pairs for JSON
+
     val summaryData = mapOf(
         "total_projects" to totalProjects,
         "total_contractors" to totalContractors,
@@ -171,12 +158,12 @@ fun generateReports(df: AnyFrame) {
         "total_savings" to String.format("%.2f", totalSavings)
     )
 
-    // write JSON manually (no external libraries)
+
     val jsonText = buildString {
-        append("{\n")
+        append("{")
         summaryData.entries.forEachIndexed { i, e ->
             val comma = if (i < summaryData.size - 1) "," else ""
-            append("""  "${e.key}": "${e.value}"$comma\n""")
+            append("""  "${e.key}": "${e.value}"$comma""")
         }
         append("}")
     }
@@ -184,13 +171,13 @@ fun generateReports(df: AnyFrame) {
     val summaryFile = File(outputDir, "summary.json")
     summaryFile.writeText(jsonText)
 
-    println("🧾 summary.json created successfully in /output/\n")
+    println("summary.json created successfully in /output/\n")
 
     println("All reports successfully saved in /output/")
     println("===============================================")
 }
 
-/* REQ-0006 – Regional Flood Mitigation Efficiency Summary */
+
 fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
     println("Report 1: Regional Flood Mitigation Efficiency Summary")
 
@@ -213,10 +200,13 @@ fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
         }
         .sortByDesc("EfficiencyScore")
 
-    grouped.writeCSV("output/report_regional_efficiency.csv")
+    val formatted = grouped.convert("Total Budget", "MedianSavings", "AvgDelay", "HighDelayPct", "EfficiencyScore")
+        .with { if (it is Number) String.format("%.2f", it.toDouble()) else it.toString() }
+
+    formatted.writeCSV("output/report_regional_efficiency.csv")
 
     println("\nTop 5 Results:")
-    printTable(grouped.take(5))
+    printTable(formatted.take(5))
     println("→ Saved as output/report_regional_efficiency.csv\n")
 
     return grouped
@@ -225,20 +215,20 @@ fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
 
 
 
-/* REQ-0007 – Top Contractors Performance Ranking */
+
 fun generateContractorPerformance(df: AnyFrame): AnyFrame {
     println("Report 2: Top Contractors Performance Ranking")
 
     val grouped = df.groupBy("Contractor").aggregate {
-        count() into "ProjectCount"
+        count() into "ProjectCount" into "NumProjects"
         sum("ContractCost") into "TotalCost"
         sum("CostSavings") into "TotalSavings"
         mean("CompletionDelayDays") into "AvgDelay"
     }
-        // Filter: only contractors with >=5 projects
+
         .filter { (it["ProjectCount"] as? Int ?: 0) >= 5 }
 
-        // Add Reliability Index (REQ-0007)
+
         .add("ReliabilityIndex") {
             val avgDelay = (it["AvgDelay"] as? Number)?.toDouble() ?: 0.0
             val totalSavings = (it["TotalSavings"] as? Number)?.toDouble() ?: 0.0
@@ -255,34 +245,37 @@ fun generateContractorPerformance(df: AnyFrame): AnyFrame {
 
         .convert("TotalCost").with { (it as? Number)?.toDouble() ?: 0.0 }
 
-        // Sort descending by TotalCost (requirement)
+
         .sortByDesc("TotalCost")
 
-        // Keep only top 15
+
         .take(15).add("Rank") { it.index() + 1 }
         .select("Rank", "Contractor", "TotalCost", "ProjectCount", "AvgDelay", "TotalSavings", "ReliabilityIndex", "RiskFlag")
 
-    // Write to CSV
-    grouped.writeCSV("output/report_contractor_ranking.csv")
+
+    val formatted = grouped.convert("TotalCost", "AvgDelay", "ReliabilityIndex", "RiskFlag")
+                        .with { if (it is Number) String.format("%.2f", it.toDouble()) else it.toString() }
+
+    formatted.writeCSV("output/report_contractor_ranking.csv")
 
     println("\nTop 5 Results:")
-    printTable(grouped.take(5))
+    printTable(formatted.take(5))
     println("→ Saved as output/report_contractor_ranking.csv\n")
 
     return grouped
 }
 
 
-/* REQ-0008 – Annual Project Type Cost Overrun Trends */
+
 fun generateOverrunTrends(df: AnyFrame): AnyFrame {
     println("Report 3: Annual Project Type Cost Overrun Trends")
 
-    // Step 1: Aggregate totals per FundingYear + TypeOfWork
+
     val grouped = df.groupBy("FundingYear", "TypeOfWork").aggregate {
         count() into "TotalProjects"
         mean("CostSavings") into "AvgSavings"
 
-        // Overrun rate (% of projects with negative CostSavings)
+
         val overrunCount = count {
             ((it["CostSavings"] as? Number)?.toDouble() ?: 0.0) < 0.0
         }
@@ -291,20 +284,22 @@ fun generateOverrunTrends(df: AnyFrame): AnyFrame {
         rate into "OverrunRate"
     }
 
-    // Step 2: Compute year-over-year % change in average savings (baseline 2021)
-    val baseline = grouped
-        .filter { (it["FundingYear"] as? Int) == 2021 }
-        .associate { it["TypeOfWork"] to (it["AvgSavings"] as? Double ?: 0.0) }
 
     val withYoY = grouped.add("YoYChangePct") { row ->
         val year = row["FundingYear"] as Int
         val type = row["TypeOfWork"]
         val avg = (row["AvgSavings"] as? Double) ?: 0.0
-        val base = baseline[type] ?: 0.0
 
-        if (year == 2021 || base == 0.0) 0.0
-        else ((avg - base) / base) * 100.0
+        if (year == 2021) 0.0
+
+        val prevYearData = grouped.filter { it["FundingYear"] == (year - 1) && it["TypeOfWork"] == type }
+
+        val prevAvgSavings = prevYearData.firstOrNull()?.get("AvgSavings") as? Double ?: 0.0
+
+        if (prevAvgSavings == 0.0) 0.0
+        else ((avg - prevAvgSavings) / prevAvgSavings) * 100.0
     }
+
 
 
     val sorted = withYoY.sortWith { r1, r2 ->
@@ -319,13 +314,13 @@ fun generateOverrunTrends(df: AnyFrame): AnyFrame {
         }
     }
 
+    val formatted = sorted.convert("AvgSavings", "OverrunRate", "YoYChangePct")
+            .with { if (it is Number) String.format("%.2f", it.toDouble()) else it.toString() }
 
-
-    // Step 4: Save and display
-    sorted.writeCSV("output/report_annual_overruns.csv")
+    formatted.writeCSV("output/report_annual_overruns.csv")
 
     println("\nTop 5 Results:")
-    printTable(sorted.take(5))
+    printTable(formatted.take(5))
     println("→ Saved as output/report_annual_overruns.csv\n")
 
     return sorted
@@ -333,19 +328,17 @@ fun generateOverrunTrends(df: AnyFrame): AnyFrame {
 
 
 
-/* ==============================================================
-   Helper function – Print table preview
-   ============================================================== */
+
 fun printTable(df: AnyFrame) {
     val cols = df.columns().map { it.name() }
     val widths = cols.map { c -> maxOf(c.length, df[c].toList().take(5).maxOfOrNull { it.toString().length } ?: 0) }
 
-    // Header
+
     val header = cols.mapIndexed { i, c -> c.padEnd(widths[i]) }.joinToString(" | ")
     println(header)
     println("-".repeat(header.length))
 
-    // Rows
+
     for (row in df.take(5).rows()) {
         val line = cols.mapIndexed { i, c -> row[c].toString().padEnd(widths[i]) }.joinToString(" | ")
         println(line)
