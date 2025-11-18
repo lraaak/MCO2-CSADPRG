@@ -181,6 +181,7 @@ fun generateReports(df: AnyFrame) {
 fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
     println("Report 1: Regional Flood Mitigation Efficiency Summary")
 
+    // Step 1: Group and Aggregate data
     val grouped = df.groupBy("MainIsland", "Region").aggregate {
         sum("ApprovedBudgetForContract") into "Total Budget"
         median("CostSavings") into "MedianSavings"
@@ -193,16 +194,34 @@ fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
         val pct = if (total > 0) delayed * 100.0 / total else 0.0
         "%.2f%%".format(pct) into "HighDelayPct"
     }
-        .add("EfficiencyScore") { row ->
-            val med = (row["MedianSavings"] as? Number)?.toDouble() ?: 0.0
-            val delay = (row["AvgDelay"] as? Number)?.toDouble() ?: 1.0
-            if (delay == 0.0) 0.0 else (med / delay) * 100.0
-        }
-        .sortByDesc("EfficiencyScore")
 
-    val formatted = grouped.convert("Total Budget", "MedianSavings", "AvgDelay", "HighDelayPct", "EfficiencyScore")
+    // Step 2: Calculate EfficiencyScore (without normalization)
+    val groupedWithScore = grouped.add("EfficiencyScore") { row ->
+        val med = (row["MedianSavings"] as? Number)?.toDouble() ?: 0.0
+        val delay = (row["AvgDelay"] as? Number)?.toDouble() ?: 1.0
+
+        if (delay == 0.0) 0.0 else (med / delay) * 100.0
+    }
+
+    // Step 3: Sort the grouped data based on the raw EfficiencyScore
+    val sorted = groupedWithScore.sortByDesc("EfficiencyScore")
+
+    // Step 4: Normalize the EfficiencyScore column using .convert() (direct modification)
+    val normalized = sorted.convert("EfficiencyScore") { value ->
+        val raw = (value as? Number)?.toDouble() ?: 0.0
+        // Normalize to 0–100 range
+        when {
+            raw > 100 -> 100.0
+            raw < 0 -> 0.0
+            else -> raw
+        }
+    }
+
+    // Step 5: Format the values for CSV output
+    val formatted = normalized.convert("Total Budget", "MedianSavings", "AvgDelay", "HighDelayPct", "EfficiencyScore")
         .with { if (it is Number) String.format("%.2f", it.toDouble()) else it.toString() }
 
+    // Step 6: Write the output to CSV
     formatted.writeCSV("output/report_regional_efficiency.csv")
 
     println("\nTop 5 Results:")
@@ -211,6 +230,7 @@ fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
 
     return grouped
 }
+
 
 
 
