@@ -181,7 +181,7 @@ fun generateReports(df: AnyFrame) {
 fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
     println("Report 1: Regional Flood Mitigation Efficiency Summary")
 
-    // Step 1: Group and Aggregate data
+   
     val grouped = df.groupBy("MainIsland", "Region").aggregate {
         sum("ApprovedBudgetForContract") into "Total Budget"
         median("CostSavings") into "MedianSavings"
@@ -195,7 +195,7 @@ fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
         "%.2f%%".format(pct) into "HighDelayPct"
     }
 
-    // Step 2: Calculate EfficiencyScore (without normalization)
+
     val groupedWithScore = grouped.add("EfficiencyScore") { row ->
         val med = (row["MedianSavings"] as? Number)?.toDouble() ?: 0.0
         val delay = (row["AvgDelay"] as? Number)?.toDouble() ?: 1.0
@@ -203,13 +203,12 @@ fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
         if (delay == 0.0) 0.0 else (med / delay) * 100.0
     }
 
-    // Step 3: Sort the grouped data based on the raw EfficiencyScore
+
     val sorted = groupedWithScore.sortByDesc("EfficiencyScore")
 
-    // Step 4: Normalize the EfficiencyScore column using .convert() (direct modification)
+
     val normalized = sorted.convert("EfficiencyScore") { value ->
         val raw = (value as? Number)?.toDouble() ?: 0.0
-        // Normalize to 0–100 range
         when {
             raw > 100 -> 100.0
             raw < 0 -> 0.0
@@ -217,15 +216,15 @@ fun generateRegionalEfficiency(df: AnyFrame): AnyFrame {
         }
     }
 
-    // Step 5: Format the values for CSV output
-    val formatted = normalized.convert("Total Budget", "MedianSavings", "AvgDelay", "HighDelayPct", "EfficiencyScore")
-        .with { if (it is Number) String.format("%.2f", it.toDouble()) else it.toString() }
 
-    // Step 6: Write the output to CSV
+    val formatted = normalized.convert("Total Budget", "MedianSavings", "AvgDelay", "HighDelayPct", "EfficiencyScore")
+        .with { if (it is Number) String.format("%,.2f", it.toDouble()) else it.toString() }
+
+
     formatted.writeCSV("output/report_regional_efficiency.csv")
 
     println("\nTop 5 Results:")
-    printTable(formatted.take(5))
+    printTable(formatted)
     println("→ Saved as output/report_regional_efficiency.csv\n")
 
     return grouped
@@ -240,13 +239,12 @@ fun generateContractorPerformance(df: AnyFrame): AnyFrame {
     println("Report 2: Top Contractors Performance Ranking")
 
     val grouped = df.groupBy("Contractor").aggregate {
-        count() into "ProjectCount" into "NumProjects"
+        count() into "NumProjects"
         sum("ContractCost") into "TotalCost"
         sum("CostSavings") into "TotalSavings"
         mean("CompletionDelayDays") into "AvgDelay"
     }
-
-        .filter { (it["ProjectCount"] as? Int ?: 0) >= 5 }
+        .filter { (it["NumProjects"] as? Int ?: 0) >= 5 }
 
 
         .add("ReliabilityIndex") {
@@ -270,16 +268,16 @@ fun generateContractorPerformance(df: AnyFrame): AnyFrame {
 
 
         .take(15).add("Rank") { it.index() + 1 }
-        .select("Rank", "Contractor", "TotalCost", "ProjectCount", "AvgDelay", "TotalSavings", "ReliabilityIndex", "RiskFlag")
+        .select("Rank", "Contractor", "TotalCost", "NumProjects", "AvgDelay", "TotalSavings", "ReliabilityIndex", "RiskFlag")
 
 
-    val formatted = grouped.convert("TotalCost", "AvgDelay", "ReliabilityIndex", "RiskFlag")
-                        .with { if (it is Number) String.format("%.2f", it.toDouble()) else it.toString() }
+    val formatted = grouped.convert("TotalCost", "AvgDelay", "TotalSavings", "ReliabilityIndex", "RiskFlag")
+                        .with { if (it is Number) String.format("%,.2f", it.toDouble()) else it.toString() }
 
     formatted.writeCSV("output/report_contractor_ranking.csv")
 
     println("\nTop 5 Results:")
-    printTable(formatted.take(5))
+    printTable(formatted)
     println("→ Saved as output/report_contractor_ranking.csv\n")
 
     return grouped
@@ -335,12 +333,12 @@ fun generateOverrunTrends(df: AnyFrame): AnyFrame {
     }
 
     val formatted = sorted.convert("AvgSavings", "OverrunRate", "YoYChangePct")
-            .with { if (it is Number) String.format("%.2f", it.toDouble()) else it.toString() }
+            .with { if (it is Number) String.format("%,.2f", it.toDouble()) else it.toString() }
 
     formatted.writeCSV("output/report_annual_overruns.csv")
 
     println("\nTop 5 Results:")
-    printTable(formatted.take(5))
+    printTable(formatted)
     println("→ Saved as output/report_annual_overruns.csv\n")
 
     return sorted
@@ -359,7 +357,7 @@ fun printTable(df: AnyFrame) {
     println("-".repeat(header.length))
 
 
-    for (row in df.take(5).rows()) {
+    for (row in df.rows()) {
         val line = cols.mapIndexed { i, c -> row[c].toString().padEnd(widths[i]) }.joinToString(" | ")
         println(line)
     }
